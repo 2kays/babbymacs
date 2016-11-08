@@ -7,5 +7,6 @@
   :depends-on (:cl-charms)
   :serial t
   :components ((:file "package")
+               (:file "utils")
                (:file "babbymacs")))
 
