@@ -101,3 +101,5 @@ is replaced with replacement."
   (replace vector vector :start2 (1+ position) :start1 position)
   (vector-pop vector)
   vector)
+
+

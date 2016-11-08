@@ -52,6 +52,14 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (bufcount :accessor editor-bufcount :initform 0 :type integer)
    (message :accessor editor-msg :initform " " :type string)))
 
+(defun line-at (y)
+  "Gets the line at Y."
+  (elt (buf-state (current-buffer)) y))
+
+(defun (setf line-at) (new y)
+  "SETF expander for the line at Y."
+  (setf (elt (buf-state (current-buffer)) y) new))
+
 (defparameter *welcomes*
   '("Babbymacs welcomes you!"
     "You have entered Babbymacs."
@@ -70,19 +78,6 @@ Easy REPL setup - why doesn't paredit like #| |# ?
                                       :initial-element ""
                                       :adjustable t
                                       :fill-pointer t)))))
-
-(defconstant +SIGINT+ 2
-  "SIGINT UNIX signal code.")
- 
-(defmacro set-signal-handler (signo &body body)
-  "Generates a signal handler for SIGNO from BODY."
-  ;; Lifted from stackoverflow
-  (let ((handler (gensym "HANDLER")))
-    `(progn
-       (cffi:defcallback ,handler :void ((signo :int))
-         (declare (ignore signo))
-         ,@body)
-       (cffi:foreign-funcall "signal" :int ,signo :pointer (cffi:callback ,handler)))))
 
 (defun current-buffer ()
   "Returns the current buffer."
@@ -176,7 +171,6 @@ key argument NEWLINE specifying if an additional newline is added to the end."
                (when (or (and (< del 0) (> y 0))
                          (and (> del 0) (< y (1- (length state)))))
                  (incf y del)
-                 (adjust-view)
                  ;; handle furthest column
                  (setf x (min fx (length (elt state y))))))))
     (let ((sign (signum delta)))
@@ -194,7 +188,7 @@ key argument NEWLINE specifying if an additional newline is added to the end."
     (when (<= 0 (+ y offset) (1- (length state)))
      (let ((line (elt state y))
            (jline (elt state (+ y offset))))
-       (setf (elt state (+ y offset)) (concat jline line))
+       (setf (line-at (+ y offset)) (concat jline line))
        (remove-from-array state y)))))
 
 (defun backspace ()
@@ -209,7 +203,7 @@ key argument NEWLINE specifying if an additional newline is added to the end."
            (join-lines -1)
            (decf y)
            (adjust-view))
-          (t (setf (elt state y) (remove-at (elt state y) (1- x)))))
+          (t (setf (line-at y) (remove-at (line-at y) (1- x)))))
     (backward)))
 
 (defun delete-char ()
@@ -221,14 +215,14 @@ key argument NEWLINE specifying if an additional newline is added to the end."
            (join-lines 1)
            (setf x 0
                  fx 0))
-          (t (setf (elt state y) (remove-at (elt state y) x))))))
+          (t (setf (line-at y) (remove-at (line-at y) x))))))
 
 (defun newline ()
   "Inserts a newline at cursor."
   (with-accessors ((x buf-cursor-x) (y buf-cursor-y) (state buf-state))
       (current-buffer)
     (destructuring-bind (s1 s2) (split-at (elt state y) x)
-      (setf (elt state y) s1)
+      (setf (line-at y) s1)
       (insert-into-array state s2 (1+ y))
       (down)
       (line-beginning))))
@@ -252,7 +246,7 @@ key argument NEWLINE specifying if an additional newline is added to the end."
       (current-buffer)
     (destructuring-bind (s1 s2)
         (split-at (elt state y) x)
-      (setf (elt state y) (format nil "~a~a~a" s1 c s2))
+      (setf (line-at y) (format nil "~a~a~a" s1 c s2))
       (forward))))
 
 (defun quit-command ()
@@ -309,9 +303,11 @@ key argument NEWLINE specifying if an additional newline is added to the end."
     (incf view amount)
     (setf view (max view 0))))
 
+;; TODO: scroll-page-up/down needs reimplementing cleanly, with cursor bound
+;;       checking and correct behaviour.
 (defun scroll-page-down ()
   (with-accessors ((x buf-cursor-x) (y buf-cursor-y)
-                   (view buf-view) (fx buf-furthest-x))
+                   (view buf-view) (fx buf-furthest-x) (state buf-state))
       (current-buffer)
     (let (theight twidth)
       (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
@@ -412,9 +408,6 @@ current global keymap."
 
 (defun %main (&optional argv)
   "Entrypoint for the editor. ARGV should contain a file path."
-  ;; Resolve C-c SIGINTs to C-c in the keymap
-  ;;(set-signal-handler +SIGINT+ (resolve-key #\Etx))
-  ;; (sb-ext:disable-debugger)
   (setf *editor-instance* (make-instance 'editor))
   (setf (editor-msg *editor-instance*)
         (concat " " (random-from-list *welcomes*)))
