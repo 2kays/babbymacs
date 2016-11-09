@@ -50,10 +50,57 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (buffers :accessor editor-buffers :initform nil :type list)
    (running :accessor editor-running :initform t :type boolean)
    (bufcount :accessor editor-bufcount :initform 0 :type integer)
-   (message :accessor editor-msg :initform " " :type string)))
+   (message :accessor editor-msg :initform " " :type string)
+   (current-window :accessor current-window)))
+
+(defclass window ()
+  ((id :initform 0 :type integer)))
+
+(defclass editor-window (window)
+  ((pad-pointer :initarg :pointer
+                :accessor pad-pointer
+                :documentation "Pointer to the curses pad.")
+   (lines :initarg :lines
+          :accessor window-lines)
+   (cols :initarg :cols
+         :accessor window-cols)
+   (buffer :accessor window-buffer)))
+
+(defun make-editor-window (&key lines cols)
+  "Create an editor window instance."
+  (let ((pointer (charms/ll:newpad lines cols)))
+    (when (cffi:null-pointer-p pointer)
+      (error "Failed to allocate pad for editor window."))
+    (make-instance 'editor-window :pointer pointer :lines lines :cols cols)))
+
+;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
+
+(defgeneric refresh-window (window)
+  (:documentation ""))
+
+(defmethod refresh-window ((ed-win editor-window))
+  ""
+  (with-slots (pad-pointer lines cols buffer) ed-win
+    (charms/ll:prefresh (pad-pointer ed-win) (buf-view buffer) 0 0 0
+                        (1- lines) (1- cols))))
+
+(defun terminal-dimensions ()
+  (let (theight twidth)
+    (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
+    (values theight twidth)))
+
+(defun terminal-height ()
+  (multiple-value-bind (height width) (terminal-dimensions)
+    (declare (ignore width))
+    height))
+
+(defun terminal-width ()
+  (multiple-value-bind (height width) (terminal-dimensions)
+    (declare (ignore height))
+    width))
 
 (defun line-at (y)
-  "Gets the line at Y."
+  "Returns the line at Y."
   (elt (buf-state (current-buffer)) y))
 
 (defun (setf line-at) (new y)
@@ -64,7 +111,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
   '("Babbymacs welcomes you!"
     "You have entered Babbymacs."
     "Yes, this is Babbymacs."
-    "Babbymacs needs no intro."))
+    "Babbymacs needs no intro.")
+  "A list of greetings to warm the heart.")
 
 (defparameter *editor-instance* nil
   "Global editor instance.")
@@ -186,8 +234,8 @@ key argument NEWLINE specifying if an additional newline is added to the end."
   (with-accessors ((x buf-cursor-x) (y buf-cursor-y) (state buf-state))
       (current-buffer)
     (when (<= 0 (+ y offset) (1- (length state)))
-     (let ((line (elt state y))
-           (jline (elt state (+ y offset))))
+     (let ((line (line-at y))
+           (jline (line-at (+ y offset))))
        (setf (line-at (+ y offset)) (concat jline line))
        (remove-from-array state y)))))
 
@@ -421,8 +469,9 @@ current global keymap."
     (charms/ll:start-color)
     (charms/ll:curs-set 2)
     (charms/ll:werase charms/ll:*stdscr*)
-    (let ((theight 1)
-          (twidth 1))
+    (let* (
+           (theight 1)
+           (twidth 1))
       ;; Set initial terminal size
       (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
       (charms/ll:use-default-colors)
@@ -435,7 +484,8 @@ current global keymap."
       ;; So we take `ceil(theight / lines)`, which gives us that multiple.
       ;; We multiply theight by that for the pad height.
       ;; TODO: dynamically react to terminal height changes when allocating pad
-      (let* ((page-cnt (ceiling (length (buf-state (current-buffer))) theight))
+      (let* ((ed-win (make-editor-window :lines theight :cols twidth))
+             (page-cnt (ceiling (length (buf-state (current-buffer))) theight))
              (pad (charms/ll:newpad (* theight page-cnt) 150))
              (mlwin (charms/ll:newwin *modeline-height* (1- twidth)
                                       (- theight *modeline-height*) 0)))
@@ -455,7 +505,7 @@ current global keymap."
                  ;; Update terminal height and width
                  (let ((last-theight theight)
                        (last-twidth twidth))
-                   (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)            
+                   (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
                    (when (or (/= theight last-theight)
                              (/= twidth last-twidth))
                      (charms/ll:wresize mlwin *modeline-height* (1- twidth))
