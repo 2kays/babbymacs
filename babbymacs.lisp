@@ -68,13 +68,20 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (width :initarg :width)
    (buffer :initarg :buffer :accessor ed-window-buffer)))
 
-(defun make-editor-window (&key buffer lines cols height width)
+(defun make-editor-window (buffer height width)
   "Create an editor window instance."
-  (let ((pointer (charms/ll:newpad lines cols)))
+  ;; TODO: programmatically determine column max (150 is reasonable for now)
+  ;; EXPLANATION FOR FUTURE ME
+  ;; Say we have theight of 50, file is 70 lines. We want to allocate the
+  ;; pad to be a multiple of theight that is enough to accomodate the lines.
+  ;; So we take `ceil(theight / lines)`, which gives us that multiple.
+  ;; We multiply theight by that for the pad height.
+  (let* ((page-cnt (ceiling (length (buf-state buffer)) height))
+         (pointer (charms/ll:newpad (* height page-cnt) width)))
     (when (cffi:null-pointer-p pointer)
       (error "Failed to allocate pad for editor window."))
-    (make-instance 'editor-window :buffer buffer :height height :width width
-                   :pointer pointer :lines lines :cols cols)))
+    (make-instance 'editor-window :pointer pointer
+                   :buffer buffer :height height :width width)))
 
 ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
 
@@ -470,28 +477,15 @@ current global keymap."
         (editor-buffers *editor-instance*))
   (charms:with-curses ()
     (charms/ll:start-color)
-    (charms/ll:curs-set 2)
+    (charms/ll:curs-set 2)              ; blinking cursor
     (charms/ll:werase charms/ll:*stdscr*)
-    (let* (
-           (theight 1)
-           (twidth 1))
-      ;; Set initial terminal size
-      (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
+    (multiple-value-bind (theight twidth) (terminal-dimensions)
       (charms/ll:use-default-colors)
       (charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
       ;; Build the pad according to the file state
-      ;; TODO: programmatically determine column max (150 is reasonable for now)
-      ;; EXPLANATION FOR FUTURE ME
-      ;; Say we have theight of 50, file is 70 lines. We want to allocate the
-      ;; pad to be a multiple of theight that is enough to accomodate the lines.
-      ;; So we take `ceil(theight / lines)`, which gives us that multiple.
-      ;; We multiply theight by that for the pad height.
-      ;; TODO: dynamically react to terminal height changes when allocating pad
-      (let* ((page-cnt (ceiling (length (buf-state (current-buffer))) theight))
-             (ed-win (make-editor-window :buffer (first (editor-buffers *editor-instance*))
-                                         :height (- theight *modeline-height* 1)
-                                         :width (- twidth 1)
-                                         :lines (* theight page-cnt) :cols twidth))
+      (let* ((ed-win (make-editor-window (first (editor-buffers *editor-instance*))
+                                         (- theight *modeline-height* 1)
+                                         (- twidth 1)))
              (pad (ed-window-pad-ptr ed-win))
              (mlwin (charms/ll:newwin *modeline-height* (1- twidth)
                                       (- theight *modeline-height*) 0)))
@@ -509,9 +503,8 @@ current global keymap."
            (restart-case
                (progn
                  ;; Update terminal height and width
-                 (let ((last-theight theight)
-                       (last-twidth twidth))
-                   (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
+                 (multiple-value-bind (last-theight last-twidth)
+                     (terminal-dimensions)
                    (when (or (/= theight last-theight)
                              (/= twidth last-twidth))
                      (charms/ll:wresize mlwin *modeline-height* (1- twidth))
