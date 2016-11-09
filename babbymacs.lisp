@@ -57,21 +57,24 @@ Easy REPL setup - why doesn't paredit like #| |# ?
   ((id :initform 0 :type integer)))
 
 (defclass editor-window (window)
-  ((pad-pointer :initarg :pointer
-                :accessor pad-pointer
-                :documentation "Pointer to the curses pad.")
+  ((window-pad-ptr :initarg :pointer
+                   :accessor ed-window-pad-ptr
+                   :documentation "Pointer to the curses pad.")
    (lines :initarg :lines
-          :accessor window-lines)
+          :accessor ed-window-lines)
    (cols :initarg :cols
-         :accessor window-cols)
-   (buffer :accessor window-buffer)))
+         :accessor ed-window-cols)
+   (height :initarg :height)
+   (width :initarg :width)
+   (buffer :initarg :buffer :accessor ed-window-buffer)))
 
-(defun make-editor-window (&key lines cols)
+(defun make-editor-window (&key buffer lines cols height width)
   "Create an editor window instance."
   (let ((pointer (charms/ll:newpad lines cols)))
     (when (cffi:null-pointer-p pointer)
       (error "Failed to allocate pad for editor window."))
-    (make-instance 'editor-window :pointer pointer :lines lines :cols cols)))
+    (make-instance 'editor-window :buffer buffer :height height :width width
+                   :pointer pointer :lines lines :cols cols)))
 
 ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
 
@@ -80,9 +83,9 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defmethod refresh-window ((ed-win editor-window))
   ""
-  (with-slots (pad-pointer lines cols buffer) ed-win
-    (charms/ll:prefresh (pad-pointer ed-win) (buf-view buffer) 0 0 0
-                        (1- lines) (1- cols))))
+  (with-slots (window-pad-ptr lines cols buffer height width) ed-win
+    (charms/ll:prefresh (ed-window-pad-ptr ed-win) (buf-view buffer) 0 0 0
+                        height width)))
 
 (defun terminal-dimensions ()
   (let (theight twidth)
@@ -484,9 +487,12 @@ current global keymap."
       ;; So we take `ceil(theight / lines)`, which gives us that multiple.
       ;; We multiply theight by that for the pad height.
       ;; TODO: dynamically react to terminal height changes when allocating pad
-      (let* ((ed-win (make-editor-window :lines theight :cols twidth))
-             (page-cnt (ceiling (length (buf-state (current-buffer))) theight))
-             (pad (charms/ll:newpad (* theight page-cnt) 150))
+      (let* ((page-cnt (ceiling (length (buf-state (current-buffer))) theight))
+             (ed-win (make-editor-window :buffer (first (editor-buffers *editor-instance*))
+                                         :height (- theight *modeline-height* 1)
+                                         :width (- twidth 1)
+                                         :lines (* theight page-cnt) :cols twidth))
+             (pad (ed-window-pad-ptr ed-win))
              (mlwin (charms/ll:newwin *modeline-height* (1- twidth)
                                       (- theight *modeline-height*) 0)))
         ;; Set up terminal behaviour
@@ -542,8 +548,9 @@ current global keymap."
                      (charms/ll:werase pad)
                      (charms/ll:mvwaddstr pad 0 0 (state-to-string state))
                      (charms/ll:wmove pad y x)
-                     (charms/ll:pnoutrefresh pad view 0 0 0
-                                             (1- winh) (- twidth 1))
+
+                     ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
+                     (refresh-window ed-win)
                      (charms/ll:doupdate))))
              (editor-sigint ()
                (resolve-key #\Etx))))
