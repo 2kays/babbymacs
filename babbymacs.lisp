@@ -68,6 +68,14 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (width :initarg :width)
    (buffer :initarg :buffer :accessor ed-window-buffer)))
 
+(defclass popup-window (window)
+  ((window-ptr :initarg :pointer
+               :accessor popwin-ptr)
+   (height :initarg :height
+           :accessor popwin-height)
+   (width :initarg :width
+          :accessor popwin-width)))
+
 (defun make-editor-window (buffer height width)
   "Create an editor window instance."
   ;; TODO: programmatically determine column max (150 is reasonable for now)
@@ -93,6 +101,11 @@ Easy REPL setup - why doesn't paredit like #| |# ?
   (with-slots (window-pad-ptr lines cols buffer height width) ed-win
     (charms/ll:prefresh (ed-window-pad-ptr ed-win) (buf-view buffer) 0 0 0
                         height width)))
+
+(defmethod refresh-window ((popwin popup-window))
+  ""
+  (with-slots (window-ptr height width) popwin
+    (charms/ll:wrefresh window-ptr)))
 
 (defun terminal-dimensions ()
   (let (theight twidth)
@@ -312,34 +325,32 @@ key argument NEWLINE specifying if an additional newline is added to the end."
 
 (defun popup (prompt height)
   "Retrieves an input from the user. Hijacks the current key input."
-  (let ((theight 1) (twidth 1)
-        (typed (make-array 0 :fill-pointer t :adjustable t
-                           :element-type 'character)))
-    (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)
-    (let* (;; (ratio (floor (/ theight 3)))
-           (cmdwin (charms/ll:newwin height
-                                     (1- twidth) (- theight height 1) 0)))
-      ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-      (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
-      (loop :named cmd-loop
-         :while (editor-running *editor-instance*)
-         :for c := (charms:get-char charms:*standard-window* :ignore-error t)
-         :do
-         (charms/ll:werase cmdwin)
-         (charms/ll:waddstr cmdwin (concat prompt typed))
-         (cond ((null c) nil)
-               ((and (> (char-code c) 31)
-                     (< (char-code c) 127))
-                (vector-push-extend c typed))
-               ((eql c #\Bel) (setf typed nil) (return-from cmd-loop))
-               ((eql c #\Del) (vector-pop typed))
-               (t (return-from cmd-loop)))
-         (charms/ll:wrefresh cmdwin))
-      ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-      (charms/ll:delwin cmdwin)
-      (charms/ll:erase)
-      ;;(charms/ll:refresh)
-      typed)))
+  (multiple-value-bind (theight twidth) (terminal-dimensions)
+    (let ((typed (make-array 0 :fill-pointer t :adjustable t
+                             :element-type 'character)))
+      (let* ((cmdwin (charms/ll:newwin height
+                                       (1- twidth) (- theight height 1) 0)))
+        ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
+        (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
+        (loop :named cmd-loop
+           :while (editor-running *editor-instance*)
+           :for c := (charms:get-char charms:*standard-window* :ignore-error t)
+           :do
+           (charms/ll:werase cmdwin)
+           (charms/ll:waddstr cmdwin (concat prompt typed))
+           (cond ((null c) nil)
+                 ((and (> (char-code c) 31)
+                       (< (char-code c) 127))
+                  (vector-push-extend c typed))
+                 ((eql c #\Bel) (setf typed nil) (return-from cmd-loop))
+                 ((eql c #\Del) (vector-pop typed))
+                 (t (return-from cmd-loop)))
+           (charms/ll:wrefresh cmdwin))
+        ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
+        (charms/ll:delwin cmdwin)
+        (charms/ll:erase)
+        ;;(charms/ll:refresh)
+        typed))))
 
 (defun run-command ()
   "Run a command input by the user. Hijacks the current key input."
@@ -551,5 +562,5 @@ current global keymap."
         ;; (charms/ll:init-pair 1 charms/ll:color_black charms/ll:color_white)
         (charms/ll:delwin pad)
         (charms/ll:delwin mlwin)
-        (charms/ll:standend)))))
-
+        (charms/ll:standend))))
+)
