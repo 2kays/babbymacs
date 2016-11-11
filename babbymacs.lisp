@@ -512,14 +512,13 @@ current global keymap."
            ;; Set up our happy C-c/SIGINT handling restart
            ;; TODO: refactor this to be less bleurgh
            (restart-case
-               (progn
-                 ;; Update terminal height and width
-                 (multiple-value-bind (last-theight last-twidth)
-                     (terminal-dimensions)
-                   (when (or (/= theight last-theight)
-                             (/= twidth last-twidth))
-                     (charms/ll:wresize mlwin *modeline-height* (1- twidth))
-                     (charms/ll:mvwin mlwin (- theight *modeline-height*) 0)))
+               ;; Update terminal height and width
+               (multiple-value-bind (last-theight last-twidth)
+                   (terminal-dimensions)
+                 (when (or (/= theight last-theight)
+                           (/= twidth last-twidth))
+                   (charms/ll:wresize mlwin *modeline-height* (1- twidth))
+                   (charms/ll:mvwin mlwin (- theight *modeline-height*) 0))
                  (with-accessors ((name buf-name) (x buf-cursor-x)
                                   (y buf-cursor-y) (state buf-state)
                                   (view buf-view))
@@ -562,5 +561,4 @@ current global keymap."
         ;; (charms/ll:init-pair 1 charms/ll:color_black charms/ll:color_white)
         (charms/ll:delwin pad)
         (charms/ll:delwin mlwin)
-        (charms/ll:standend))))
-)
+        (charms/ll:standend)))))
