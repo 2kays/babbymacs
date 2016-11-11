@@ -29,8 +29,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 ;;  * Popup window like Emacs' popwin.el for completions/command result etc.
 ;;  * Refactor command popup window into something more flexible than hijacking
 ;;    the key input loop for its own purposes.
-;;     - Implement as an instance of a floating/popup window?
-;;     - Display the result of a command if one is provided.
+;;     - Implement as an instance of a floating/popup window? (DONE)
+;;     - Display the result of a command if one is provided. (DONE)
 ;;
 ;;  * Hooks, especially on cursor position change (for autoscroll, bounding, ..)
 
@@ -44,14 +44,22 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (cursor-y :accessor buf-cursor-y :initform 0 :type integer)
    (furthest-x :accessor buf-furthest-x :initform 0 :type integer)
    (view :accessor buf-view :initform 0 :type integer)))
-
+ 
 (defclass editor ()
   ((current :accessor editor-current :initform 0 :type integer)
    (buffers :accessor editor-buffers :initform nil :type list)
    (running :accessor editor-running :initform t :type boolean)
    (bufcount :accessor editor-bufcount :initform 0 :type integer)
    (message :accessor editor-msg :initform " " :type string)
-   (current-window :accessor current-window)))
+   (current-window :accessor current-window)
+   (windows :accessor editor-windows :initform nil :type list)))
+
+;; I think it would be a lot better to implement this as a generic window class,
+;; with mixins for different behaviour,
+;; e.g. temporary, popup, pad-backed, input-capturing, ...
+;;      editor windows would be pad-backed & input-capturing
+;;      modeline is window-backed
+;;      prompt windows are window-backed, popup & input-capturing
 
 (defclass window ()
   ((id :initform 0 :type integer)))
@@ -96,16 +104,31 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defgeneric refresh-window (window)
   (:documentation ""))
 
-(defmethod refresh-window ((ed-win editor-window))
+(defmethod refresh-window ((edwin editor-window))
   ""
-  (with-slots (window-pad-ptr lines cols buffer height width) ed-win
-    (charms/ll:prefresh (ed-window-pad-ptr ed-win) (buf-view buffer) 0 0 0
+  (with-slots (window-pad-ptr lines cols buffer height width) edwin
+    (charms/ll:prefresh (ed-window-pad-ptr edwin) (buf-view buffer) 0 0 0
                         height width)))
 
 (defmethod refresh-window ((popwin popup-window))
   ""
   (with-slots (window-ptr height width) popwin
     (charms/ll:wrefresh window-ptr)))
+
+(defgeneric update-window (window)
+  (:documentation ""))
+
+(defmethod update-window ((edwin editor-window))
+  (with-slots (window-pad-ptr buffer) edwin
+    (charms/ll:werase window-pad-ptr)
+    (charms/ll:mvwaddstr window-pad-ptr 0 0
+                         (state-to-string (buf-state buffer)))
+    (charms/ll:wmove window-pad-ptr
+                     (buf-cursor-y buffer)
+                     (buf-cursor-x buffer))))
+
+(defmethod update-window ((popwin popup-window))
+  nil)
 
 (defun terminal-dimensions ()
   (let (theight twidth)
@@ -548,9 +571,7 @@ current global keymap."
                        (charms/ll:wnoutrefresh mlwin)
                        )
                      ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
-                     (charms/ll:werase pad)
-                     (charms/ll:mvwaddstr pad 0 0 (state-to-string state))
-                     (charms/ll:wmove pad y x)
+                     (update-window ed-win)
 
                      ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
                      (refresh-window ed-win)
