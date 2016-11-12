@@ -560,57 +560,55 @@ current global keymap."
     (charms/ll:start-color)
     (charms/ll:curs-set 2)              ; blinking cursor
     (charms/ll:werase charms/ll:*stdscr*)
-    (multiple-value-bind (theight twidth) (terminal-dimensions)
-      (charms/ll:use-default-colors)
-      (charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
-      (charms:disable-echoing)
-      (charms:enable-raw-input :interpret-control-characters t)
-      (charms:enable-non-blocking-mode charms:*standard-window*)
-      ;; (charms:clear-window charms:*standard-window* :force-repaint t)
-      (loop :named driver-loop
-         :with ed-win := (make-editor-window (first (editor-buffers *editor-instance*))
-                                             (- theight *modeline-height* 1)
-                                             (- twidth 1))
-         :with ml-win := (make-modeline-window twidth)
-         :while (editor-running *editor-instance*)
-         :for c := (charms:get-char charms:*standard-window* :ignore-error t)
-         :do
-         ;; Set up our happy C-c/SIGINT handling restart
-         ;; TODO: refactor this to be less bleurgh
-         (restart-case
-             (with-accessors ((name buf-name) (x buf-cursor-x)
-                              (y buf-cursor-y) (state buf-state)
-                              (view buf-view))
-                 (current-buffer)
-               ;; Update terminal dimensions
-               (multiple-value-setq (theight twidth) (terminal-dimensions))
-               (cond ((null c) nil)     ; ignore nils
-                     ;; 32->126 are printable, so print c if it's not a part of
-                     ;; a meta command
-                     ((and (printablep c) (not *current-keymap*))
-                      (insert-char c))
-                     (t (resolve-key c)))
-               ;; Draw the modeline
-               (unless (zerop *modeline-height*)
-                 (setf (mlwin-left-text ml-win)
-                       (editor-msg *editor-instance*))
-                 (setf (mlwin-right-text ml-win)
-                       (modeline-formatter *modeline-format*))
-                 (setf (mlwin-width ml-win) twidth)
-                 (update-window ml-win)
-                 (refresh-window ml-win)
-                 )
-               ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
-               (setf (ed-window-cols ed-win) theight)
-               (setf (ed-window-lines ed-win) twidth)
-               (update-window ed-win)
-               (refresh-window ed-win)
-               (charms/ll:doupdate))
-           (editor-sigint ()
-             (resolve-key #\Etx)))
-         :finally
-         ;; Cleanup
-         (delete-window ed-win)
-         (delete-window ml-win)
-         (charms/ll:standend)))))
+    (charms/ll:use-default-colors)
+    (charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
+    (charms:disable-echoing)
+    (charms:enable-raw-input :interpret-control-characters t)
+    (charms:enable-non-blocking-mode charms:*standard-window*)
+    (loop :with (theight twidth) := (multiple-value-list (terminal-dimensions))
+       :with ed-win := (make-editor-window (first (editor-buffers *editor-instance*))
+                                           (- theight *modeline-height* 1)
+                                           (- twidth 1))
+       :with ml-win := (make-modeline-window twidth)
+       :while (editor-running *editor-instance*)
+       :for c := (charms:get-char charms:*standard-window* :ignore-error t)
+       :do
+       ;; Set up our happy C-c/SIGINT handling restart
+       ;; TODO: refactor this to be less bleurgh
+       (restart-case
+           (with-accessors ((name buf-name) (x buf-cursor-x)
+                            (y buf-cursor-y) (state buf-state)
+                            (view buf-view))
+               (current-buffer)
+             ;; Update terminal dimensions
+             (multiple-value-setq (theight twidth) (terminal-dimensions))
+             (cond ((null c) nil)     ; ignore nils
+                   ;; 32->126 are printable, so print c if it's not a part of
+                   ;; a meta command
+                   ((and (printablep c) (not *current-keymap*))
+                    (insert-char c))
+                   (t (resolve-key c)))
+             ;; Draw the modeline
+             (unless (zerop *modeline-height*)
+               (setf (mlwin-left-text ml-win)
+                     (editor-msg *editor-instance*))
+               (setf (mlwin-right-text ml-win)
+                     (modeline-formatter *modeline-format*))
+               (setf (mlwin-width ml-win) twidth)
+               (update-window ml-win)
+               (refresh-window ml-win)
+               )
+             ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
+             (setf (ed-window-cols ed-win) theight)
+             (setf (ed-window-lines ed-win) twidth)
+             (update-window ed-win)
+             (refresh-window ed-win)
+             (charms/ll:doupdate))
+         (editor-sigint ()
+           (resolve-key #\Etx)))
+       :finally
+       ;; Cleanup
+       (delete-window ed-win)
+       (delete-window ml-win)
+       (charms/ll:standend))))
 
