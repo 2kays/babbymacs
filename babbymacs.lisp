@@ -156,6 +156,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defmethod update-window ((mlwin modeline-window))
   ""
   (with-slots (window-ptr left-text right-text width) mlwin
+    (charms/ll:wresize window-ptr *modeline-height* (1- width))
+    (charms/ll:mvwin window-ptr (- (terminal-height) *modeline-height*) 0)
     (charms/ll:werase window-ptr)
     (charms/ll:wbkgd window-ptr (charms/ll:color-pair 1))
     (charms/ll:mvwaddstr window-ptr 0 0 left-text)
@@ -571,40 +573,36 @@ current global keymap."
            ;; TODO: refactor this to be less bleurgh
            (restart-case
                ;; Update terminal height and width
-               (multiple-value-bind (last-theight last-twidth)
-                   (terminal-dimensions)
-                 (when (or (/= theight last-theight)
-                           (/= twidth last-twidth))
-                   (charms/ll:wresize mlwin *modeline-height* (1- twidth))
-                   (charms/ll:mvwin mlwin (- theight *modeline-height*) 0))
-                 (with-accessors ((name buf-name) (x buf-cursor-x)
-                                  (y buf-cursor-y) (state buf-state)
-                                  (view buf-view))
-                     (current-buffer)
-                   ;; if we previously pressed the meta key, resolve commands from the
-                   ;; meta map, otherwise use the standard root key map
-                   ;;(if c (format t "received ~s~%" c))
-                   (cond ((null c) nil) ; ignore nils
-                         ;; 32->126 are printable, so print c if it's not a part of
-                         ;; a meta command
-                         ((and (printablep c) (not *current-keymap*))
-                          (insert-char c))
-                         (t (resolve-key c)))
-                   ;; write the updated file state to the pad and display it at the
-                   ;; relevant y level
-                   (let* ((mlh *modeline-height*)
-                          (mstr (modeline-formatter *modeline-format*)))
-                     ;; Draw the modeline
-                     (unless (zerop mlh)
-                       (setf (mlwin-left-text ml-win) (editor-msg *editor-instance*))
-                       (setf (mlwin-right-text ml-win) mstr)
-                       (update-window ml-win)
-                       (refresh-window ml-win)
-                       )
-                     ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
-                     (update-window ed-win)
-                     (refresh-window ed-win)
-                     (charms/ll:doupdate))))
+               (with-accessors ((name buf-name) (x buf-cursor-x)
+                                (y buf-cursor-y) (state buf-state)
+                                (view buf-view))
+                   (current-buffer)
+                 (multiple-value-setq (theight twidth) (terminal-dimensions))
+                 ;; if we previously pressed the meta key, resolve commands from the
+                 ;; meta map, otherwise use the standard root key map
+                 ;;(if c (format t "received ~s~%" c))
+                 (cond ((null c) nil) ; ignore nils
+                       ;; 32->126 are printable, so print c if it's not a part of
+                       ;; a meta command
+                       ((and (printablep c) (not *current-keymap*))
+                        (insert-char c))
+                       (t (resolve-key c)))
+                 ;; write the updated file state to the pad and display it at the
+                 ;; relevant y level
+                 (let* ((mlh *modeline-height*)
+                        (mstr (modeline-formatter *modeline-format*)))
+                   ;; Draw the modeline
+                   (unless (zerop mlh)
+                     (setf (mlwin-left-text ml-win) (editor-msg *editor-instance*))
+                     (setf (mlwin-right-text ml-win) mstr)
+                     (setf (mlwin-width ml-win) twidth)
+                     (update-window ml-win)
+                     (refresh-window ml-win)
+                     )
+                   ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
+                   (update-window ed-win)
+                   (refresh-window ed-win)
+                   (charms/ll:doupdate)))
              (editor-sigint ()
                (resolve-key #\Etx))))
         ;; Cleanup
