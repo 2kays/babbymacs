@@ -493,6 +493,10 @@ key argument NEWLINE specifying if an additional newline is added to the end."
     (#\Syn . scroll-page-down)          ; C-v
     ))
 
+(defun set-cursor-blink (boolean)
+  "Specify if the cursor should blink."
+  (charms/ll:curs-set (if boolean 2 1)))
+
 (defun printablep (char)
   "Checks if CHAR is a printable ASCII character."
   (< 31 (char-code char) 127))
@@ -535,6 +539,30 @@ current global keymap."
                (concatf (editor-msg *editor-instance*)
                         (string (prettify-char c)) " is unbound.")))))
 
+(defmacro with-curses ((&key (cursor-blink t)) &body body)
+  "Modification of CHARMS:WITH-CURSES."
+  `(unwind-protect
+        (progn
+          (force-output *terminal-io*)
+          (let ((stdscr (charms/ll:initscr)))
+            (when (cffi:null-pointer-p stdscr)
+              (error "Call to CHARMS/LL:INITSCR failed.")))
+          ;; Clear the screen
+          (charms/ll:wrefresh charms/ll:*stdscr*)
+          (charms/ll:werase charms/ll:*stdscr*)
+          ;; Initialise colors if available
+          (when (charms/ll:has-colors) (charms/ll:start-color))
+          ;; Blinking cursor
+          (set-cursor-blink ,cursor-blink)
+          (let ((charms:*standard-window* (charms:standard-window)))
+            ;; Standard terminal setup
+            (charms:disable-echoing)
+            (charms:enable-raw-input :interpret-control-characters t)
+            (charms:enable-non-blocking-mode charms:*standard-window*)
+            ,@body))
+     (charms/ll:endwin)
+     (charms/ll:standend)))
+
 (defun main (&optional argv)
   "True entrypoint for the editor. Sets up the C-c condition handler."
   ;; This is likely wrong of me, however it does work...
@@ -556,15 +584,10 @@ current global keymap."
             (make-buffer))
         (editor-buffers *editor-instance*))
   ;; Set up terminal behaviour
-  (charms:with-curses ()
-    (charms/ll:start-color)
-    (charms/ll:curs-set 2)              ; blinking cursor
-    (charms/ll:werase charms/ll:*stdscr*)
+  (with-curses ()
     (charms/ll:use-default-colors)
     (charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
-    (charms:disable-echoing)
-    (charms:enable-raw-input :interpret-control-characters t)
-    (charms:enable-non-blocking-mode charms:*standard-window*)
+    
     (loop :with (theight twidth) := (multiple-value-list (terminal-dimensions))
        :with ed-win := (make-editor-window (first (editor-buffers *editor-instance*))
                                            (- theight *modeline-height* 1)
@@ -609,6 +632,5 @@ current global keymap."
        :finally
        ;; Cleanup
        (delete-window ed-win)
-       (delete-window ml-win)
-       (charms/ll:standend))))
+       (delete-window ml-win))))
 
