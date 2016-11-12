@@ -84,6 +84,15 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (width :initarg :width
           :accessor popwin-width)))
 
+(defclass modeline-window (window)
+  ((window-ptr :initarg :pointer :accessor mlwin-ptr)
+   (left-text :initarg :left-text
+              :accessor mlwin-left-text :type string)
+   (right-text :initarg :right-text
+               :accessor mlwin-right-text :type string)
+   (width :initarg :width
+          :accessor mlwin-width)))
+
 (defun make-editor-window (buffer height width)
   "Create an editor window instance."
   ;; TODO: programmatically determine column max (150 is reasonable for now)
@@ -98,6 +107,15 @@ Easy REPL setup - why doesn't paredit like #| |# ?
       (error "Failed to allocate pad for editor window."))
     (make-instance 'editor-window :pointer pointer
                    :buffer buffer :height height :width width)))
+
+(defun make-modeline-window (width)
+  "Create a modeline window instance."
+  (let* ((pointer (charms/ll:newwin *modeline-height* (1- width)
+                                    (- (terminal-height) *modeline-height*) 0)))
+    (when (cffi:null-pointer-p pointer)
+      (error "Failed to allocate pad for editor window."))
+    (make-instance 'modeline-window :pointer pointer
+                   :width width)))
 
 ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
 
@@ -115,6 +133,11 @@ Easy REPL setup - why doesn't paredit like #| |# ?
   (with-slots (window-ptr height width) popwin
     (charms/ll:wrefresh window-ptr)))
 
+(defmethod refresh-window ((mlwin modeline-window))
+  ""
+  (with-slots (window-ptr) mlwin
+    (charms/ll:wnoutrefresh window-ptr)))
+
 (defgeneric update-window (window)
   (:documentation ""))
 
@@ -129,6 +152,18 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defmethod update-window ((popwin popup-window))
   nil)
+
+(defmethod update-window ((mlwin modeline-window))
+  ""
+  (with-slots (window-ptr left-text right-text width) mlwin
+    (charms/ll:werase window-ptr)
+    (charms/ll:wbkgd window-ptr (charms/ll:color-pair 1))
+    (charms/ll:mvwaddstr window-ptr 0 0 left-text)
+    (charms/ll:mvwaddstr window-ptr 0 (- width (length right-text) 1)
+                         right-text)
+    ;;(charms/ll:mvwaddstr window-ptr 0 0 (editor-msg *editor-instance*))
+    ;;(charms/ll:mvwaddstr window-ptr 0 (- twidth (length mstr) 1) mstr)
+    ))
 
 (defun terminal-dimensions ()
   (let (theight twidth)
@@ -520,9 +555,9 @@ current global keymap."
       (let* ((ed-win (make-editor-window (first (editor-buffers *editor-instance*))
                                          (- theight *modeline-height* 1)
                                          (- twidth 1)))
+             (ml-win (make-modeline-window twidth))
              (pad (ed-window-pad-ptr ed-win))
-             (mlwin (charms/ll:newwin *modeline-height* (1- twidth)
-                                      (- theight *modeline-height*) 0)))
+             (mlwin (mlwin-ptr ml-win)))
         ;; Set up terminal behaviour
         ;; (charms:clear-window charms:*standard-window* :force-repaint t)
         (charms:disable-echoing)
@@ -558,22 +593,16 @@ current global keymap."
                    ;; write the updated file state to the pad and display it at the
                    ;; relevant y level
                    (let* ((mlh *modeline-height*)
-                          (winh (- theight mlh))
                           (mstr (modeline-formatter *modeline-format*)))
                      ;; Draw the modeline
                      (unless (zerop mlh)
-                       (charms/ll:werase mlwin)
-                       (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
-                       ;; (charms/ll:wattron mlwin (charms/ll:color-pair 1))
-                       (charms/ll:mvwaddstr mlwin 0 0 (editor-msg *editor-instance*))
-                       (charms/ll:mvwaddstr mlwin 0 (- twidth (length mstr) 1) mstr)
-                       ;; (charms/ll:wattroff mlwin (charms/ll:color-pair 1))
-                       (charms/ll:wnoutrefresh mlwin)
+                       (setf (mlwin-left-text ml-win) (editor-msg *editor-instance*))
+                       (setf (mlwin-right-text ml-win) mstr)
+                       (update-window ml-win)
+                       (refresh-window ml-win)
                        )
                      ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
                      (update-window ed-win)
-
-                     ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
                      (refresh-window ed-win)
                      (charms/ll:doupdate))))
              (editor-sigint ()
