@@ -4,7 +4,7 @@
 
 "
 Easy REPL setup - why doesn't paredit like #| |# ?
-(ql:quickload '(:swank :cl-charms) :silent t)
+(ql:quickload '(:swank :babbymacs) :silent t)
 (swank:create-server :port 4006 :dont-close t)
 "
 
@@ -159,7 +159,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
     (charms/ll:wresize window-ptr *modeline-height* (1- width))
     (charms/ll:mvwin window-ptr (- (terminal-height) *modeline-height*) 0)
     (charms/ll:werase window-ptr)
-    (charms/ll:wbkgd window-ptr (charms/ll:color-pair 1))
+    ;;(charms/ll:attron charms/ll:a_reverse)
+    (charms/ll:wbkgd window-ptr charms/ll:a_reverse)
     (charms/ll:mvwaddstr window-ptr 0 0 left-text)
     (charms/ll:mvwaddstr window-ptr 0 (- width (length right-text) 1)
                          right-text)
@@ -400,7 +401,8 @@ key argument NEWLINE specifying if an additional newline is added to the end."
       (let* ((cmdwin (charms/ll:newwin height
                                        (1- twidth) (- theight height 1) 0)))
         ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-        (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
+        ;; (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
+        (charms/ll:wbkgd cmdwin charms/ll:a_reverse)
         (loop :named cmd-loop
            :while (editor-running *editor-instance*)
            :for c := (charms:get-char charms:*standard-window* :ignore-error t)
@@ -551,6 +553,7 @@ current global keymap."
           (charms/ll:wrefresh charms/ll:*stdscr*)
           (charms/ll:werase charms/ll:*stdscr*)
           ;; Initialise colors if available
+          (charms/ll:use-default-colors)
           (when (charms/ll:has-colors) (charms/ll:start-color))
           ;; Blinking cursor
           (set-cursor-blink ,cursor-blink)
@@ -585,9 +588,7 @@ current global keymap."
         (editor-buffers *editor-instance*))
   ;; Set up terminal behaviour
   (with-curses ()
-    (charms/ll:use-default-colors)
-    (charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
-    
+    ;;(charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
     (loop :with (theight twidth) := (multiple-value-list (terminal-dimensions))
        :with ed-win := (make-editor-window (first (editor-buffers *editor-instance*))
                                            (- theight *modeline-height* 1)
@@ -619,8 +620,7 @@ current global keymap."
                      (modeline-formatter *modeline-format*))
                (setf (mlwin-width ml-win) twidth)
                (update-window ml-win)
-               (refresh-window ml-win)
-               )
+               (refresh-window ml-win))
              ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
              (setf (ed-window-cols ed-win) theight)
              (setf (ed-window-lines ed-win) twidth)
