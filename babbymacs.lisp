@@ -514,29 +514,27 @@ key argument NEWLINE specifying if an additional newline is added to the end."
 
 (defun resolve-key (c)
   "Resolves an input key C to a command or nested keymap according to the
-current global keymap."
-  (let* ((entry-pair (assoc c (if *current-keymap*
-                                  *current-keymap*
-                                  (prog1 *root-keymap*
-                                    ;; If it's the root keymap, reset the msg
-                                    (setf (editor-msg *editor-instance*)
-                                          " "))))))
+current global keymap."  
+  (let* ((keymap (or *current-keymap* *root-keymap*))
+         (entry-pair (assoc c keymap)))
+    ;; On the root keymap? Reset the editor msg
+    (when (equal keymap *root-keymap*)
+      (setf (editor-msg *editor-instance*) " "))
     ;; if the entry for the keymap has resolved to something
     ;; if it's a function/symbol, run it
     ;; if it's a list, set the current keymap to it
     (if entry-pair
         (let ((entry (cdr entry-pair)))
-          (cond ((or (functionp entry)
-                     (symbolp entry))
-                 (funcall entry)
-                 (setf *current-keymap* nil))
-                ((consp entry)
-                 (setf *current-keymap* entry)
-                 (concatf (editor-msg *editor-instance*)
-                          (string (prettify-char c)) " "))
-                (t (setf *current-keymap* nil)
-                   (concatf (editor-msg *editor-instance*)
-                            (string (prettify-char c)) " is invalid."))))
+          (typecase entry
+            ((or function symbol)
+             (funcall entry)
+             (setf *current-keymap* nil))
+            (cons (setf *current-keymap* entry)
+                  (concatf (editor-msg *editor-instance*)
+                           (string (prettify-char c)) " "))
+            (t (setf *current-keymap* nil)
+               (concatf (editor-msg *editor-instance*)
+                        (string (prettify-char c)) " is invalid."))))
         (progn (setf *current-keymap* nil)
                (concatf (editor-msg *editor-instance*)
                         (string (prettify-char c)) " is unbound.")))))
