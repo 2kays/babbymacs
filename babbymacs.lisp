@@ -476,10 +476,13 @@ key argument NEWLINE specifying if an additional newline is added to the end."
             fx 0))))
 
 (defun next-buffer (&optional (delta 1))
-  "Jump to the next (+ DELTA)  buffer in the buffer list."  
-  (setf (editor-current-win *editor-instance*)
-        (mod (+ (editor-current-win *editor-instance*) delta)
-             (1- (length (editor-buffers *editor-instance*))))))
+  "Jump to the next (+ DELTA)  buffer in the buffer list."
+  ;; TODO: cleanup
+  (setf (ed-window-buffer (elt (editor-windows *editor-instance*)
+                               (editor-current-win *editor-instance*)))
+        (mod (+ (ed-window-buffer (elt (editor-windows *editor-instance*)
+                                       (editor-current-win *editor-instance*))) delta)
+             (length (editor-buffers *editor-instance*)))))
 
 ;;; End of editor commands
 
