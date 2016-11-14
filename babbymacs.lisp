@@ -46,12 +46,11 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (view :accessor buf-view :initform 0 :type integer)))
  
 (defclass editor ()
-  ((current :accessor editor-current :initform 0 :type integer)
+  ((running :accessor editor-running :initform t :type boolean)
    (buffers :accessor editor-buffers :initform nil :type list)
-   (running :accessor editor-running :initform t :type boolean)
    (bufcount :accessor editor-bufcount :initform 0 :type integer)
    (message :accessor editor-msg :initform " " :type string)
-   (current-window :accessor current-window)
+   (current-window :accessor editor-current-win :type integer)
    (windows :accessor editor-windows :initform nil :type list)))
 
 ;; I think it would be a lot better to implement this as a generic window class,
@@ -74,7 +73,7 @@ Easy REPL setup - why doesn't paredit like #| |# ?
          :accessor ed-window-cols)
    (height :initarg :height)
    (width :initarg :width)
-   (buffer :initarg :buffer :accessor ed-window-buffer)))
+   (buffer :initarg :buffer :accessor ed-window-buffer :type integer)))
 
 (defclass popup-window (window)
   ((window-ptr :initarg :pointer
@@ -93,20 +92,24 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (width :initarg :width
           :accessor mlwin-width)))
 
-(defun make-editor-window (buffer height width)
+(defun make-editor-window (bufno height width)
   "Create an editor window instance."
+  ;;(check-type buffer buffer)
   ;; TODO: programmatically determine column max (150 is reasonable for now)
   ;; EXPLANATION FOR FUTURE ME
   ;; Say we have theight of 50, file is 70 lines. We want to allocate the
   ;; pad to be a multiple of theight that is enough to accomodate the lines.
   ;; So we take `ceil(theight / lines)`, which gives us that multiple.
   ;; We multiply theight by that for the pad height.
-  (let* ((page-cnt (ceiling (length (buf-state buffer)) height))
+  (let* ((buffer (get-message-buffer))
+         (page-cnt (ceiling (length (buf-state buffer)) height))
          (pointer (charms/ll:newpad (* height page-cnt) width)))
     (when (cffi:null-pointer-p pointer)
       (error "Failed to allocate pad for editor window."))
-    (make-instance 'editor-window :pointer pointer
-                   :buffer buffer :height height :width width)))
+    (let ((edwin (make-instance 'editor-window :pointer pointer
+                                :buffer bufno :height height :width width)))
+      (push edwin (editor-windows *editor-instance*))
+      edwin)))
 
 (defun make-modeline-window (width)
   "Create a modeline window instance."
@@ -125,7 +128,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defmethod refresh-window ((edwin editor-window))
   ""
   (with-slots (window-pad-ptr lines cols buffer height width) edwin
-    (charms/ll:prefresh (ed-window-pad-ptr edwin) (buf-view buffer) 0 0 0
+    (charms/ll:prefresh (ed-window-pad-ptr edwin)
+                        (buf-view (elt (editor-buffers *editor-instance*) buffer)) 0 0 0
                         height width)))
 
 (defmethod refresh-window ((popwin popup-window))
@@ -143,12 +147,13 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defmethod update-window ((edwin editor-window))
   (with-slots (window-pad-ptr buffer) edwin
-    (charms/ll:werase window-pad-ptr)
-    (charms/ll:mvwaddstr window-pad-ptr 0 0
-                         (state-to-string (buf-state buffer)))
-    (charms/ll:wmove window-pad-ptr
-                     (buf-cursor-y buffer)
-                     (buf-cursor-x buffer))))
+    (let ((actual-buffer (elt (editor-buffers *editor-instance*) buffer)))
+      (charms/ll:werase window-pad-ptr)
+      (charms/ll:mvwaddstr window-pad-ptr 0 0
+                           (state-to-string (buf-state actual-buffer)))
+      (charms/ll:wmove window-pad-ptr
+                       (buf-cursor-y actual-buffer)
+                       (buf-cursor-x actual-buffer)))))
 
 (defmethod update-window ((popwin popup-window))
   nil)
@@ -222,7 +227,10 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defun current-buffer ()
   "Returns the current buffer."
-  (elt (editor-buffers *editor-instance*) (editor-current *editor-instance*)))
+  (elt (editor-buffers *editor-instance*)
+       (ed-window-buffer
+        (elt (editor-windows *editor-instance*)
+             (editor-current-win *editor-instance*)))))
 
 (defparameter *modeline-height* 1
   "The height of the mode line.")
@@ -467,6 +475,12 @@ key argument NEWLINE specifying if an additional newline is added to the end."
       (setf x 0
             fx 0))))
 
+(defun next-buffer (&optional (delta 1))
+  "Jump to the next (+ DELTA)  buffer in the buffer list."  
+  (setf (editor-current-win *editor-instance*)
+        (mod (+ (editor-current-win *editor-instance*) delta)
+             (1- (length (editor-buffers *editor-instance*))))))
+
 ;;; End of editor commands
 
 (defparameter *meta-map*
@@ -476,6 +490,7 @@ key argument NEWLINE specifying if an additional newline is added to the end."
 
 (defparameter *c-x-map*
   `((#\Etx . exit-editor)               ; C-x C-c
+    (#\o . next-buffer)                 ; C-x o
     ))
 
 (defparameter *root-keymap*
@@ -510,7 +525,7 @@ key argument NEWLINE specifying if an additional newline is added to the end."
         ((char= char #\Backspace) "<backspace>")
         ((< 0 (char-code char) 32)
          (concat "C-" (string (code-char (+ 96 (char-code char))))))
-        (t (concat "\\" (write-to-string (char-code char))))))
+        (t (concat "[" (write-to-string (char-code char)) "]"))))
 
 (defun resolve-key (c)
   "Resolves an input key C to a command or nested keymap according to the
@@ -564,31 +579,22 @@ current global keymap."
      (charms/ll:endwin)
      (charms/ll:standend)))
 
-(defun main (&optional argv)
-  "True entrypoint for the editor. Sets up the C-c condition handler."
-  ;; This is likely wrong of me, however it does work...
-  (handler-bind ((sb-sys:interactive-interrupt
-                  (lambda (c)
-                    (declare (ignore c))
-                    (invoke-restart 'editor-sigint))))
-    (%main argv)))
+(defun get-message-buffer ()
+  (find "*Messages*" (editor-buffers *editor-instance*)
+        :key #'buf-name :test #'string=))
 
-(defun %main (&optional argv)
+(defun create-message-buffer ()
+  (let ((msg-buffer (make-buffer "*Messages*" '("Test"))))
+    (push msg-buffer (editor-buffers *editor-instance*))))
+
+(defun main-loop ()
   "Entrypoint for the editor. ARGV should contain a file path."
-  (setf *editor-instance* (make-instance 'editor))
-  (setf (editor-msg *editor-instance*)
-        (concat " " (random-from-list *welcomes*)))
-  (setf *current-keymap* nil)
-  ;; if argv is set, open that file, else create an empty buffer
-  (push (if argv
-            (make-buffer argv (file-to-array argv))
-            (make-buffer))
-        (editor-buffers *editor-instance*))
   ;; Set up terminal behaviour
   (with-curses ()
     ;;(charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
     (loop :with (theight twidth) := (multiple-value-list (terminal-dimensions))
-       :with ed-win := (make-editor-window (first (editor-buffers *editor-instance*))
+;;       :with first-buf := (first (editor-buffers *editor-instance*))
+       :with ed-win := (make-editor-window 0
                                            (- theight *modeline-height* 1)
                                            (- twidth 1))
        :with ml-win := (make-modeline-window twidth)
@@ -632,3 +638,23 @@ current global keymap."
        (delete-window ed-win)
        (delete-window ml-win))))
 
+(defun main (&optional argv)
+  "True entrypoint for the editor. Sets up the C-c condition handler."
+  ;; This is likely wrong of me, however it does work...
+  (setf *editor-instance* (make-instance 'editor))
+  (setf (editor-msg *editor-instance*)
+        (concat " " (random-from-list *welcomes*)))
+  (setf *current-keymap* nil)
+  (create-message-buffer)
+  (setf (editor-current-win *editor-instance*) 0)
+  
+  ;; if argv is set, open that file, else create an empty buffer
+  (push (if argv
+            (make-buffer argv (file-to-array argv))
+            (make-buffer))
+        (editor-buffers *editor-instance*))
+  (handler-bind ((sb-sys:interactive-interrupt
+                  (lambda (c)
+                    (declare (ignore c))
+                    (invoke-restart 'editor-sigint))))
+    (main-loop)))
