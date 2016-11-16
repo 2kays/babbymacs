@@ -219,13 +219,20 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defun make-buffer (&optional name state filename)
   "Creates a BUFFER with name NAME and state STATE (\"\" default)."
   (with-slots (bufcount) *editor-instance*
+    ;; If provided state is a list, convert to resizeable vector
+    (when (listp state)
+      (setf state (make-array 1
+                              :element-type 'string
+                              :initial-contents state
+                              :adjustable t
+                              :fill-pointer t)))
     (make-instance 'buffer
                    :name (or name (format nil "buffer~a" (incf bufcount)))
                    :filename filename
                    :state (or state (make-array 1 :element-type 'string
-                                      :initial-element ""
-                                      :adjustable t
-                                      :fill-pointer t)))))
+                                                :initial-element ""
+                                                :adjustable t
+                                                :fill-pointer t)))))
 
 (defun current-window ()
   "Gets the instance of the current window."
@@ -492,6 +499,8 @@ key argument NEWLINE specifying if an additional newline is added to the end."
              (length (editor-buffers *editor-instance*)))))
 
 (defun write-buffer-to-file (&optional path)
+  "Writes the current buffer to either the path associated with the buffer, 
+PATH, or the result of prompting the user for a filepath."
   (with-slots (name filename state) (current-buffer)
     (let ((dest-file (or path filename (popup "Write buffer to path: " 1))))
       (array-to-file dest-file state)
