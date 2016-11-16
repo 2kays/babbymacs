@@ -48,6 +48,11 @@ EOF properly."
       (read-sequence str f)
       str)))
 
+(defun array-to-file (path array)
+  (with-open-file (fs path :direction :output)
+    (loop :for line :across array :do
+       (write-line line fs))))
+
 ;; split a sequence SEQ at POS
 (defun split-at (seq pos)
   "Split a sequence SEQ at position POS."

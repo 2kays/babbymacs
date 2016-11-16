@@ -38,6 +38,7 @@ Easy REPL setup - why doesn't paredit like #| |# ?
   ((name :accessor buf-name
          :initarg :name
          :type string)
+   (filename :accessor buf-filename :initarg :filename :type string)
    (state :accessor buf-state
           :initarg :state)
    (cursor-x :accessor buf-cursor-x :initform 0 :type integer)
@@ -215,18 +216,24 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defparameter *editor-instance* nil
   "Global editor instance.")
 
-(defun make-buffer (&optional name state)
+(defun make-buffer (&optional name state filename)
   "Creates a BUFFER with name NAME and state STATE (\"\" default)."
   (with-slots (bufcount) *editor-instance*
     (make-instance 'buffer
                    :name (or name (format nil "buffer~a" (incf bufcount)))
+                   :filename filename
                    :state (or state (make-array 1 :element-type 'string
                                       :initial-element ""
                                       :adjustable t
                                       :fill-pointer t)))))
 
+(defun current-window ()
+  "Gets the instance of the current window."
+  (elt (editor-windows *editor-instance*)
+       (editor-current-win *editor-instance*)))
+
 (defun current-buffer ()
-  "Returns the current buffer."
+  "Returns the current buffer in the current window."
   (elt (editor-buffers *editor-instance*)
        (ed-window-buffer
         (elt (editor-windows *editor-instance*)
@@ -484,6 +491,12 @@ key argument NEWLINE specifying if an additional newline is added to the end."
                                        (editor-current-win *editor-instance*))) delta)
              (length (editor-buffers *editor-instance*)))))
 
+(defun write-buffer-to-file (&optional path)
+  (with-slots (name filename state) (current-buffer)
+    (let ((dest-file (or path filename (popup "Write buffer to path: " 1))))
+      (array-to-file dest-file state)
+      (setf (editor-msg *editor-instance*)
+            (concat "Wrote " name " to " dest-file)))))
 ;;; End of editor commands
 
 (defparameter *meta-map*
@@ -653,7 +666,7 @@ current global keymap."
   
   ;; if argv is set, open that file, else create an empty buffer
   (push (if argv
-            (make-buffer argv (file-to-array argv))
+            (make-buffer argv (file-to-array argv) argv)
             (make-buffer))
         (editor-buffers *editor-instance*))
   (handler-bind ((sb-sys:interactive-interrupt
