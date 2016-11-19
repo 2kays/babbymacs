@@ -183,6 +183,12 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defmethod delete-window ((mlwin modeline-window))
   (charms/ll:delwin (mlwin-ptr mlwin)))
 
+(defgeneric consume-input (window character)
+  (:documentation ""))
+
+(defmethod consume-input ((win window) char)
+  (setf (editor-msg *editor-instance*) "Consumed1"))
+
 (defun terminal-dimensions ()
   (let (theight twidth)
     (charms/ll:getmaxyx charms/ll:*stdscr* theight twidth)

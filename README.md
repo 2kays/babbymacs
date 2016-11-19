@@ -2,6 +2,7 @@
 
 A small emacs-like terminal text editor, in Common Lisp, backed by the
 [cl-charms](https://github.com/HiTECNOLOGYs/cl-charms) ncurses binding.
+
 *Only tested with SBCL so far. C-c handling requires implementation-specific
 SIGINT condition handlers.*
 
