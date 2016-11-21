@@ -62,7 +62,7 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 ;;      prompt windows are window-backed, popup & input-capturing
 
 (defclass window ()
-  ((id :initform 0 :type integer)))
+  ((focusable :accessor win-focusable :initarg :focusable :initform t :type boolean)))
 
 (defclass editor-window (window)
   ((window-pad-ptr :initarg :pointer
@@ -119,7 +119,7 @@ Easy REPL setup - why doesn't paredit like #| |# ?
     (when (cffi:null-pointer-p pointer)
       (error "Failed to allocate pad for editor window."))
     (make-instance 'modeline-window :pointer pointer
-                   :width width)))
+                   :width width :focusable nil)))
 
 ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
 
