@@ -83,7 +83,9 @@ Easy REPL setup - why doesn't paredit like #| |# ?
    (height :initarg :height
            :accessor popwin-height)
    (width :initarg :width
-          :accessor popwin-width)))
+          :accessor popwin-width)
+   (prompt :initarg :prompt :accessor popwin-prompt :initform "" :type string)
+   (input-string :initarg :input :accessor popwin-input :initform "" :type string)))
 
 (defclass modeline-window (window)
   ((window-ptr :initarg :pointer :accessor mlwin-ptr)
@@ -124,6 +126,18 @@ Easy REPL setup - why doesn't paredit like #| |# ?
                                  :width width :focusable nil)))
       (push ml (editor-windows *editor-instance*))
       ml)))
+
+(defun make-popup-window (prompt &key (height 1) (width 50))
+  (let ((typed (make-array 0 :fill-pointer t :adjustable t
+                           :element-type 'character))
+        (pointer (charms/ll:newwin height (1- width)
+                                   (- (terminal-height) height 1) 0)))
+    (charms/ll:wbkgd pointer charms/ll:a_reverse)
+    (let ((popwin (make-instance 'popup-window :pointer pointer
+                                 :prompt prompt :height height :width width
+                                 :input typed)))
+      (push popwin (editor-windows *editor-instance*))
+      popwin)))
 
 ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
 
@@ -200,6 +214,14 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defmethod consume-input ((win window) char)
   (setf (editor-msg *editor-instance*) "Consumed1"))
+
+(defmethod consume-input ((edwin editor-window) char)
+  (cond ((null char) nil)                  ; ignore nils
+        ;; 32->126 are printable, so print c if it's not a part of
+        ;; a meta command
+        ((and (printablep char) (not *current-keymap*))
+         (insert-char char))
+        (t (resolve-key char))))
 
 (defun terminal-dimensions ()
   (let (theight twidth)
@@ -433,33 +455,31 @@ key argument NEWLINE specifying if an additional newline is added to the end."
 
 (defun popup (prompt height)
   "Retrieves an input from the user. Hijacks the current key input."
-  (multiple-value-bind (theight twidth) (terminal-dimensions)
-    (let ((typed (make-array 0 :fill-pointer t :adjustable t
-                             :element-type 'character)))
-      (let* ((cmdwin (charms/ll:newwin height
-                                       (1- twidth) (- theight height 1) 0)))
-        ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-        ;; (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
-        (charms/ll:wbkgd cmdwin charms/ll:a_reverse)
-        (loop :named cmd-loop
-           :while (editor-running *editor-instance*)
-           :for c := (charms:get-char charms:*standard-window* :ignore-error t)
-           :do
-           (charms/ll:werase cmdwin)
-           (charms/ll:waddstr cmdwin (concat prompt typed))
-           (cond ((null c) nil)
-                 ((and (> (char-code c) 31)
-                       (< (char-code c) 127))
-                  (vector-push-extend c typed))
-                 ((eql c #\Bel) (setf typed nil) (return-from cmd-loop))
-                 ((eql c #\Del) (vector-pop typed))
-                 (t (return-from cmd-loop)))
-           (charms/ll:wrefresh cmdwin))
-        ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-        (charms/ll:delwin cmdwin)
-        (charms/ll:erase)
-        ;;(charms/ll:refresh)
-        typed))))
+  (let ((popwin (make-popup-window prompt
+                                   :height height :width (terminal-width))))
+    ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
+    ;; (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
+    (charms/ll:wbkgd (popwin-ptr popwin) charms/ll:a_reverse)
+    (loop :named cmd-loop
+       :while (editor-running *editor-instance*)
+       :for c := (charms:get-char charms:*standard-window* :ignore-error t)
+       :do
+       (charms/ll:werase (popwin-ptr popwin))
+       (charms/ll:waddstr (popwin-ptr popwin) (concat prompt (popwin-input popwin)))
+       (cond ((null c) nil)
+             ((and (> (char-code c) 31)
+                   (< (char-code c) 127))
+              (concatf (popwin-input popwin) (string c)))
+             ((eql c #\Bel) (setf (popwin-input popwin) nil) (return-from cmd-loop))
+             ((eql c #\Del) (setf (popwin-input popwin)
+                                  (subseq (popwin-input popwin) 0 (length (popwin-input popwin)))))
+             (t (return-from cmd-loop)))
+       (charms/ll:wrefresh (popwin-ptr popwin)))
+    ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
+    (charms/ll:delwin (popwin-ptr popwin))
+    (charms/ll:erase)
+    ;;(charms/ll:refresh)
+    (popwin-input popwin)))
 
 (defun run-command ()
   "Run a command input by the user. Hijacks the current key input."
@@ -568,10 +588,10 @@ PATH, or the result of prompting the user for a filepath."
          (concat "C-" (string (code-char (+ 96 (char-code char))))))
         (t (concat "[" (write-to-string (char-code char)) "]"))))
 
-(defun resolve-key (c)
+(defun resolve-key (c &optional override-keymap)
   "Resolves an input key C to a command or nested keymap according to the
-current global keymap."  
-  (let* ((keymap (or *current-keymap* *root-keymap*))
+current global keymap."
+  (let* ((keymap (or override-keymap *current-keymap* *root-keymap*))
          (entry-pair (assoc c keymap)))
     ;; On the root keymap? Reset the editor msg
     (when (equal keymap *root-keymap*)
@@ -648,12 +668,7 @@ current global keymap."
                (current-buffer)
              ;; Update terminal dimensions
              (multiple-value-setq (theight twidth) (terminal-dimensions))
-             (cond ((null c) nil)       ; ignore nils
-                   ;; 32->126 are printable, so print c if it's not a part of
-                   ;; a meta command
-                   ((and (printablep c) (not *current-keymap*))
-                    (insert-char c))
-                   (t (resolve-key c)))
+             (consume-input (current-window) c)
              ;; Draw all windows
              (dolist (window (editor-windows *editor-instance*))
                (update-window window)
