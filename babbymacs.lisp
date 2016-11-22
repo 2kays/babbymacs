@@ -62,7 +62,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 ;;      prompt windows are window-backed, popup & input-capturing
 
 (defclass window ()
-  ((focusable :accessor win-focusable :initarg :focusable :initform t :type boolean)))
+  ((focusable :accessor win-focusable :initarg :focusable
+              :initform t :type boolean)))
 
 (defclass editor-window (window)
   ((window-pad-ptr :initarg :pointer
@@ -118,6 +119,7 @@ Easy REPL setup - why doesn't paredit like #| |# ?
                                     (- (terminal-height) *modeline-height*) 0)))
     (when (cffi:null-pointer-p pointer)
       (error "Failed to allocate pad for editor window."))
+    ;; ensure that a modeline instance can never be in focus
     (make-instance 'modeline-window :pointer pointer
                    :width width :focusable nil)))
 
@@ -147,7 +149,9 @@ Easy REPL setup - why doesn't paredit like #| |# ?
   (:documentation ""))
 
 (defmethod update-window ((edwin editor-window))
-  (with-slots (window-pad-ptr buffer) edwin
+  (with-slots (window-pad-ptr buffer cols lines) edwin
+    (setf cols (terminal-height))
+    (setf lines (terminal-width))
     (let ((actual-buffer (elt (editor-buffers *editor-instance*) buffer)))
       (charms/ll:werase window-pad-ptr)
       (charms/ll:mvwaddstr window-pad-ptr 0 0
@@ -161,18 +165,24 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defmethod update-window ((mlwin modeline-window))
   ""
-  (with-slots (window-ptr left-text right-text width) mlwin
-    (charms/ll:wresize window-ptr *modeline-height* (1- width))
-    (charms/ll:mvwin window-ptr (- (terminal-height) *modeline-height*) 0)
-    (charms/ll:werase window-ptr)
-    ;;(charms/ll:attron charms/ll:a_reverse)
-    (charms/ll:wbkgd window-ptr charms/ll:a_reverse)
-    (charms/ll:mvwaddstr window-ptr 0 0 left-text)
-    (charms/ll:mvwaddstr window-ptr 0 (- width (length right-text) 1)
-                         right-text)
-    ;;(charms/ll:mvwaddstr window-ptr 0 0 (editor-msg *editor-instance*))
-    ;;(charms/ll:mvwaddstr window-ptr 0 (- twidth (length mstr) 1) mstr)
-    ))
+  (unless (zerop *modeline-height*)
+   (with-slots (window-ptr left-text right-text width) mlwin
+     
+     (setf left-text (editor-msg *editor-instance*))
+     (setf right-text (modeline-formatter *modeline-format*))
+     (setf width (terminal-width))
+    
+     (charms/ll:wresize window-ptr *modeline-height* (1- width))
+     (charms/ll:mvwin window-ptr (- (terminal-height) *modeline-height*) 0)
+     (charms/ll:werase window-ptr)
+     ;;(charms/ll:attron charms/ll:a_reverse)
+     (charms/ll:wbkgd window-ptr charms/ll:a_reverse)
+     (charms/ll:mvwaddstr window-ptr 0 0 left-text)
+     (charms/ll:mvwaddstr window-ptr 0 (- width (length right-text) 1)
+                          right-text)
+     ;;(charms/ll:mvwaddstr window-ptr 0 0 (editor-msg *editor-instance*))
+     ;;(charms/ll:mvwaddstr window-ptr 0 (- twidth (length mstr) 1) mstr)
+     )))
 
 (defgeneric delete-window (window)
   (:documentation ""))
@@ -648,17 +658,10 @@ current global keymap."
                     (insert-char c))
                    (t (resolve-key c)))
              ;; Draw the modeline
-             (unless (zerop *modeline-height*)
-               (setf (mlwin-left-text ml-win)
-                     (editor-msg *editor-instance*))
-               (setf (mlwin-right-text ml-win)
-                     (modeline-formatter *modeline-format*))
-               (setf (mlwin-width ml-win) twidth)
-               (update-window ml-win)
-               (refresh-window ml-win))
+             (update-window ml-win)
+             (refresh-window ml-win)
              ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
-             (setf (ed-window-cols ed-win) theight)
-             (setf (ed-window-lines ed-win) twidth)
+             
              (update-window ed-win)
              (refresh-window ed-win)
              (charms/ll:doupdate))
