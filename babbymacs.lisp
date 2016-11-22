@@ -120,8 +120,10 @@ Easy REPL setup - why doesn't paredit like #| |# ?
     (when (cffi:null-pointer-p pointer)
       (error "Failed to allocate pad for editor window."))
     ;; ensure that a modeline instance can never be in focus
-    (make-instance 'modeline-window :pointer pointer
-                   :width width :focusable nil)))
+    (let ((ml (make-instance 'modeline-window :pointer pointer
+                                 :width width :focusable nil)))
+      (push ml (editor-windows *editor-instance*))
+      ml)))
 
 ;; (charms/ll:pnoutrefresh pad view 0 0 0 (1- winh) (- twidth 1))
 
@@ -252,15 +254,13 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defun current-window ()
   "Gets the instance of the current window."
-  (elt (editor-windows *editor-instance*)
+  (elt (remove-if-not #'win-focusable (editor-windows *editor-instance*))
        (editor-current-win *editor-instance*)))
 
 (defun current-buffer ()
   "Returns the current buffer in the current window."
   (elt (editor-buffers *editor-instance*)
-       (ed-window-buffer
-        (elt (editor-windows *editor-instance*)
-             (editor-current-win *editor-instance*)))))
+       (ed-window-buffer (current-window))))
 
 (defparameter *modeline-height* 1
   "The height of the mode line.")
@@ -632,13 +632,10 @@ current global keymap."
   "Entrypoint for the editor. ARGV should contain a file path."
   ;; Set up terminal behaviour
   (with-curses ()
-    ;;(charms/ll:init-pair 1 charms/ll:color_white charms/ll:color_black)
     (loop :with (theight twidth) := (multiple-value-list (terminal-dimensions))
-;;       :with first-buf := (first (editor-buffers *editor-instance*))
-       :with ed-win := (make-editor-window 0
-                                           (- theight *modeline-height* 1)
-                                           (- twidth 1))
-       :with ml-win := (make-modeline-window twidth)
+       :initially
+       (make-editor-window 0 (- theight *modeline-height* 1) (- twidth 1))
+       (make-modeline-window twidth)
        :while (editor-running *editor-instance*)
        :for c := (charms:get-char charms:*standard-window* :ignore-error t)
        :do
@@ -651,26 +648,22 @@ current global keymap."
                (current-buffer)
              ;; Update terminal dimensions
              (multiple-value-setq (theight twidth) (terminal-dimensions))
-             (cond ((null c) nil)     ; ignore nils
+             (cond ((null c) nil)       ; ignore nils
                    ;; 32->126 are printable, so print c if it's not a part of
                    ;; a meta command
                    ((and (printablep c) (not *current-keymap*))
                     (insert-char c))
                    (t (resolve-key c)))
-             ;; Draw the modeline
-             (update-window ml-win)
-             (refresh-window ml-win)
-             ;; (charms/ll:wbkgd mlwin (charms/ll:color-pair 1))
-             
-             (update-window ed-win)
-             (refresh-window ed-win)
+             ;; Draw all windows
+             (dolist (window (editor-windows *editor-instance*))
+               (update-window window)
+               (refresh-window window))
              (charms/ll:doupdate))
          (editor-sigint ()
            (resolve-key #\Etx)))
        :finally
        ;; Cleanup
-       (delete-window ed-win)
-       (delete-window ml-win))))
+       (mapc #'delete-window (editor-windows *editor-instance*)))))
 
 (defun main (&optional argv)
   "True entrypoint for the editor. Sets up the C-c condition handler."
