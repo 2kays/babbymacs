@@ -154,6 +154,9 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defmethod refresh-window ((popwin popup-window))
   ""
   (with-slots (window-ptr height width) popwin
+    (charms/ll:werase (popwin-ptr popwin))
+    (charms/ll:waddstr (popwin-ptr popwin)
+                       (concat (popwin-prompt popwin) (popwin-input popwin)))
     (charms/ll:wrefresh window-ptr)))
 
 (defmethod refresh-window ((mlwin modeline-window))
@@ -177,7 +180,7 @@ Easy REPL setup - why doesn't paredit like #| |# ?
                        (buf-cursor-x actual-buffer)))))
 
 (defmethod update-window ((popwin popup-window))
-  nil)
+  (charms/ll:wrefresh (popwin-ptr popwin)))
 
 (defmethod update-window ((mlwin modeline-window))
   ""
@@ -209,6 +212,9 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 (defmethod delete-window ((mlwin modeline-window))
   (charms/ll:delwin (mlwin-ptr mlwin)))
 
+(defmethod delete-window ((popwin popup-window))
+  (charms/ll:delwin (popwin-ptr popwin)))
+
 (defgeneric consume-input (window character)
   (:documentation ""))
 
@@ -222,6 +228,16 @@ Easy REPL setup - why doesn't paredit like #| |# ?
         ((and (printablep char) (not *current-keymap*))
          (insert-char char))
         (t (resolve-key char))))
+
+(defmethod consume-input ((popwin popup-window) c)
+  (cond ((null c) nil)
+        ((and (> (char-code c) 31)
+              (< (char-code c) 127))
+         (concatf (popwin-input popwin) (string c)))
+        ((eql c #\Bel) (setf (popwin-input popwin) nil))
+        ((eql c #\Del) (setf (popwin-input popwin)
+                             (subseq (popwin-input popwin) 0
+                                     (1- (length (popwin-input popwin))))))))
 
 (defun terminal-dimensions ()
   (let (theight twidth)
@@ -459,24 +475,14 @@ key argument NEWLINE specifying if an additional newline is added to the end."
                                    :height height :width (terminal-width))))
     ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
     ;; (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
-    (charms/ll:wbkgd (popwin-ptr popwin) charms/ll:a_reverse)
     (loop :named cmd-loop
        :while (editor-running *editor-instance*)
        :for c := (charms:get-char charms:*standard-window* :ignore-error t)
        :do
-       (charms/ll:werase (popwin-ptr popwin))
-       (charms/ll:waddstr (popwin-ptr popwin) (concat prompt (popwin-input popwin)))
-       (cond ((null c) nil)
-             ((and (> (char-code c) 31)
-                   (< (char-code c) 127))
-              (concatf (popwin-input popwin) (string c)))
-             ((eql c #\Bel) (setf (popwin-input popwin) nil) (return-from cmd-loop))
-             ((eql c #\Del) (setf (popwin-input popwin)
-                                  (subseq (popwin-input popwin) 0 (length (popwin-input popwin)))))
-             (t (return-from cmd-loop)))
-       (charms/ll:wrefresh (popwin-ptr popwin)))
+       (consume-input popwin c)
+       (refresh-window popwin))
     ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-    (charms/ll:delwin (popwin-ptr popwin))
+    (delete-window popwin)
     (charms/ll:erase)
     ;;(charms/ll:refresh)
     (popwin-input popwin)))
