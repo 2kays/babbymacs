@@ -471,21 +471,9 @@ key argument NEWLINE specifying if an additional newline is added to the end."
 
 (defun popup (prompt height)
   "Retrieves an input from the user. Hijacks the current key input."
-  (let ((popwin (make-popup-window prompt
-                                   :height height :width (terminal-width))))
-    ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-    ;; (charms/ll:wbkgd cmdwin (charms/ll:color-pair 1))
-    (loop :named cmd-loop
-       :while (editor-running *editor-instance*)
-       :for c := (charms:get-char charms:*standard-window* :ignore-error t)
-       :do
-       (consume-input popwin c)
-       (refresh-window popwin))
-    ;; (charms/ll:wattron cmdwin (charms/ll:color-pair 1))
-    (delete-window popwin)
-    (charms/ll:erase)
-    ;;(charms/ll:refresh)
-    (popwin-input popwin)))
+  (make-popup-window prompt :height height :width (terminal-width))
+  ;; TODO: properly set the focused window and dispatch key input
+  )
 
 (defun run-command ()
   "Run a command input by the user. Hijacks the current key input."
