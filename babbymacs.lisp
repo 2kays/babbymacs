@@ -231,11 +231,13 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defmethod consume-input ((popwin popup-window) c)
   (cond ((null c) nil)
-        ((and (> (char-code c) 31)
-              (< (char-code c) 127))
+        ((printablep c)
          (concatf (popwin-input popwin) (string c)))
-        ((eql c #\Bel) (setf (editor-msg *editor-instance*)
-                             (popwin-input popwin)))
+        ((eql c #\Lf)
+         (setf (editor-msg *editor-instance*) (popwin-input popwin))
+         (delete-window popwin)
+         ;; TODO: more idiotproof method for adding/removing windows
+         (pop (editor-windows *editor-instance*)))
         ((eql c #\Del) (setf (popwin-input popwin)
                              (subseq (popwin-input popwin) 0
                                      (1- (length (popwin-input popwin))))))))
@@ -667,8 +669,7 @@ current global keymap."
        ;; TODO: refactor this to be less bleurgh
        (restart-case
            (progn
-             ;; Dispatch key input to the current window
-          
+             ;; Dispatch key input to the current window          
              (consume-input (current-window) c)
              ;; Draw all windows
              (dolist (window (editor-windows *editor-instance*))
