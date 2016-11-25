@@ -234,7 +234,8 @@ Easy REPL setup - why doesn't paredit like #| |# ?
         ((and (> (char-code c) 31)
               (< (char-code c) 127))
          (concatf (popwin-input popwin) (string c)))
-        ((eql c #\Bel) (setf (popwin-input popwin) nil))
+        ((eql c #\Bel) (setf (editor-msg *editor-instance*)
+                             (popwin-input popwin)))
         ((eql c #\Del) (setf (popwin-input popwin)
                              (subseq (popwin-input popwin) 0
                                      (1- (length (popwin-input popwin))))))))
@@ -308,20 +309,23 @@ Easy REPL setup - why doesn't paredit like #| |# ?
 
 (defun modeline-formatter (string)
   "Returns the formatted modeline string."
-  (with-accessors ((name buf-name) (x buf-cursor-x) (y buf-cursor-y)
-                   (state buf-state))
-      (current-buffer)
-    ;; TODO: this is awful, refactor
-    (loop :with modified := string
-       :with spec := `(("%p" . ,(write-to-string
-                                 (truncate (* (/ y (max 1 (1- (length state))))
-                                              100))))
-                       ("%x" . ,(write-to-string x))
-                       ("%y" . ,(write-to-string y))
-                       ("%b" . ,name))
-       :for (k . v) :in spec
-       :do (setf modified (replace-all modified k v))
-       :finally (return modified))))
+  (typecase (current-window)
+    (editor-window
+     (with-accessors ((name buf-name) (x buf-cursor-x) (y buf-cursor-y)
+                      (state buf-state))
+         (current-buffer)
+       ;; TODO: this is awful, refactor
+       (loop :with modified := string
+          :with spec := `(("%p" . ,(write-to-string
+                                    (truncate (* (/ y (max 1 (1- (length state))))
+                                                 100))))
+                          ("%x" . ,(write-to-string x))
+                          ("%y" . ,(write-to-string y))
+                          ("%b" . ,name))
+          :for (k . v) :in spec
+          :do (setf modified (replace-all modified k v))
+          :finally (return modified))))
+    (popup-window " ^ ")))
 
 (defparameter *current-keymap* nil
   "The current keymap for input lookups.")
@@ -471,16 +475,22 @@ key argument NEWLINE specifying if an additional newline is added to the end."
 
 (defun popup (prompt height)
   "Retrieves an input from the user. Hijacks the current key input."
-  (make-popup-window prompt :height height :width (terminal-width))
-  ;; TODO: properly set the focused window and dispatch key input
-  )
+  (let ((popwin (make-popup-window prompt
+                                   :height height
+                                   :width (terminal-width))))
+    ;; TODO: properly set the focused window and dispatch key input
+    (setf (editor-current-win *editor-instance*) 0)))
+
+(defun run-command* ()
+  "Run a command input by the user. Hijacks the current key input."
+  (let ((result (popup " Eval: " 1)))
+    (when result 
+      (setf (editor-msg *editor-instance*)
+            (format nil " => ~S" (eval (read-from-string result)))))))
 
 (defun run-command ()
   "Run a command input by the user. Hijacks the current key input."
-  (let ((result (popup " Eval: " 1)))
-    (when result
-      (setf (editor-msg *editor-instance*)
-            (format nil " => ~S" (eval (read-from-string result)))))))
+  (popup " What is your quest? " 1))
 
 (defun exit-editor (&optional force)
   "Exits the editor."
@@ -646,22 +656,19 @@ current global keymap."
   "Entrypoint for the editor. ARGV should contain a file path."
   ;; Set up terminal behaviour
   (with-curses ()
-    (loop :with (theight twidth) := (multiple-value-list (terminal-dimensions))
-       :initially
-       (make-editor-window 0 (- theight *modeline-height* 1) (- twidth 1))
-       (make-modeline-window twidth)
+    (loop :initially
+       (multiple-value-bind (theight twidth) (terminal-dimensions)
+         (make-editor-window 0 (- theight *modeline-height* 1) (- twidth 1))
+         (make-modeline-window twidth))
        :while (editor-running *editor-instance*)
        :for c := (charms:get-char charms:*standard-window* :ignore-error t)
        :do
        ;; Set up our happy C-c/SIGINT handling restart
        ;; TODO: refactor this to be less bleurgh
        (restart-case
-           (with-accessors ((name buf-name) (x buf-cursor-x)
-                            (y buf-cursor-y) (state buf-state)
-                            (view buf-view))
-               (current-buffer)
-             ;; Update terminal dimensions
-             (multiple-value-setq (theight twidth) (terminal-dimensions))
+           (progn
+             ;; Dispatch key input to the current window
+          
              (consume-input (current-window) c)
              ;; Draw all windows
              (dolist (window (editor-windows *editor-instance*))
@@ -682,8 +689,7 @@ current global keymap."
         (concat " " (random-from-list *welcomes*)))
   (setf *current-keymap* nil)
   (create-message-buffer)
-  (setf (editor-current-win *editor-instance*) 0)
-  
+  (setf (editor-current-win *editor-instance*) 0)  
   ;; if argv is set, open that file, else create an empty buffer
   (push (if argv
             (make-buffer argv (file-to-array argv) argv)
